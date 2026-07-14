@@ -6,7 +6,7 @@ For the tool list, supported inputs, examples, and common response shapes, see [
 
 ## Installation
 
-The intended setup flow is:
+The required setup flow is:
 
 1. Download the release archive for your operating system.
 2. Extract the archive.

@@ -36,14 +36,31 @@ The agent must not write any values into `.env`, including non-secret defaults.
 
 ## Setup Flow
 
-1. Check the user's operating system and choose the correct release archive.
-2. Tell the user to extract the archive locally.
-3. Create `.env` from `.env.example`.
-4. Stop before any credential entry and instruct the user to fill in secret values locally in their own editor.
-5. Register the executable in the user's MCP client config so it is invokable in a new session.
-6. Tell the user to restart the MCP client, open a new session, and run read-only checks before enabling write or destructive actions.
+Default rule: use the published release archive, not a source checkout.
 
-If the user is developing from source rather than installing a release archive, then it is acceptable to explain the Go-based development flow as a secondary path.
+1. Detect the user's operating system and architecture.
+2. Identify the matching published release asset.
+3. Download that release archive.
+4. Tell the user to extract the archive locally, or extract it if local policy allows.
+5. Create `.env` from `.env.example`.
+6. Stop before any credential entry and instruct the user to fill in secret values locally in their own editor.
+7. Register the extracted executable in the user's MCP client config so it is invokable in a new session.
+8. Tell the user to restart the MCP client, open a new session, and run read-only checks before enabling write or destructive actions.
+
+Source setup is allowed only if at least one of the following is true:
+
+1. The user explicitly asked for a source or development setup.
+2. No compatible release asset exists.
+3. The user is actively developing this repository.
+
+If none of those conditions is true, do not clone the repository and do not build from source.
+
+## Installation Path Guardrails
+
+1. Do not replace the release-install path with a source build for convenience or speed.
+2. If release asset discovery fails because of sandbox or network restrictions, request permission to inspect the release metadata instead of switching to `git clone`.
+3. If release asset names are unclear, stop and report that uncertainty to the user before taking a different installation path.
+4. Treat source installation as a fallback that requires explicit justification in the final response.
 
 ## Safety Rules
 
