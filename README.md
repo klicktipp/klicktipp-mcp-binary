@@ -123,7 +123,7 @@ Example:
 {
   "mcpServers": {
     "klicktipp": {
-      "command": "/absolute/path/to/klicktipp-mcp",
+      "command": "/absolute/path/to/extracted-folder/klicktipp-mcp",
       "args": []
     }
   }
@@ -140,7 +140,7 @@ Example:
 
 ```toml
 [mcp_servers.klicktipp]
-command = "/absolute/path/to/klicktipp-mcp"
+command = "/absolute/path/to/extracted-folder/klicktipp-mcp"
 args = []
 ```
 
@@ -157,7 +157,7 @@ Example:
 {
   "mcpServers": {
     "klicktipp": {
-      "command": "/absolute/path/to/klicktipp-mcp",
+      "command": "/absolute/path/to/extracted-folder/klicktipp-mcp",
       "args": []
     }
   }
