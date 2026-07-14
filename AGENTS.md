@@ -38,6 +38,8 @@ The agent must not write any values into `.env`, including non-secret defaults.
 
 Default rule: use the published release archive, not a source checkout.
 
+For public repositories, inspect `README`, release notes, and release metadata without cloning when that is sufficient for the task.
+
 1. Detect the user's operating system and architecture.
 2. Identify the matching published release asset.
 3. Download that release archive.
@@ -58,9 +60,11 @@ If none of those conditions is true, do not clone the repository and do not buil
 ## Installation Path Guardrails
 
 1. Do not replace the release-install path with a source build for convenience or speed.
-2. If release asset discovery fails because of sandbox or network restrictions, request permission to inspect the release metadata instead of switching to `git clone`.
-3. If release asset names are unclear, stop and report that uncertainty to the user before taking a different installation path.
-4. Treat source installation as a fallback that requires explicit justification in the final response.
+2. Do not clone a public repository just to read `README`, release notes, installation steps, or release asset names.
+3. Prefer GitHub page access, release metadata, or raw-file access before considering `git clone`.
+4. If release asset discovery fails because of sandbox or network restrictions, request permission to inspect the release metadata instead of switching to `git clone`.
+5. If release asset names are unclear, stop and report that uncertainty to the user before taking a different installation path.
+6. Treat source installation as a fallback that requires explicit justification in the final response.
 
 ## Safety Rules
 
