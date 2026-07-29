@@ -21,9 +21,16 @@ type Config struct {
 	EnableWrites bool
 	EnableDanger bool
 	AuditLogs    bool
+	EnvFilePath  string
+	EnvFileFound bool
 }
 
 func LoadEnv(path string) (map[string]string, error) {
+	env, _, err := LoadEnvWithSource(path)
+	return env, err
+}
+
+func LoadEnvWithSource(path string) (map[string]string, bool, error) {
 	env := map[string]string{}
 	for _, pair := range os.Environ() {
 		parts := strings.SplitN(pair, "=", 2)
@@ -35,9 +42,9 @@ func LoadEnv(path string) (map[string]string, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return env, nil
+			return env, false, nil
 		}
-		return nil, err
+		return nil, false, err
 	}
 	defer file.Close()
 
@@ -60,7 +67,7 @@ func LoadEnv(path string) (map[string]string, error) {
 		}
 	}
 
-	return env, scanner.Err()
+	return env, true, scanner.Err()
 }
 
 func FromEnv(env map[string]string) (Config, error) {
@@ -106,6 +113,28 @@ func (c Config) WritesAllowed() bool {
 
 func (c Config) DestructiveAllowed() bool {
 	return c.ToolMode == "full" && c.EnableWrites && c.EnableDanger
+}
+
+func (c Config) MissingSettingsError(context string, names ...string) error {
+	requirement := requiredSettingsMessage(context, names)
+	if c.EnvFilePath == "" {
+		return fmt.Errorf("%s", requirement)
+	}
+	if c.EnvFileFound {
+		return fmt.Errorf("configuration file %q was loaded, but %s", c.EnvFilePath, requirement)
+	}
+	return fmt.Errorf("configuration file %q was not found; %s", c.EnvFilePath, requirement)
+}
+
+func requiredSettingsMessage(context string, names []string) string {
+	switch len(names) {
+	case 0:
+		return fmt.Sprintf("configuration is incomplete for %s", context)
+	case 1:
+		return fmt.Sprintf("%s is required for %s", names[0], context)
+	default:
+		return fmt.Sprintf("%s and %s are required for %s", strings.Join(names[:len(names)-1], ", "), names[len(names)-1], context)
+	}
 }
 
 func parseBool(value string, defaultValue bool) bool {

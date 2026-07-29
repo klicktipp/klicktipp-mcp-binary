@@ -14,8 +14,18 @@ import (
 
 func PartnerHeaders(cfg config.Config) (map[string]string, error) {
 	username := strings.TrimSpace(cfg.Username)
+	missing := make([]string, 0, 3)
 	if username == "" {
-		return nil, fmt.Errorf("KT_USERNAME is required for partner auth")
+		missing = append(missing, "KT_USERNAME")
+	}
+	if strings.TrimSpace(cfg.DeveloperKey) == "" {
+		missing = append(missing, "KT_DEVELOPER_KEY")
+	}
+	if strings.TrimSpace(cfg.CustomerKey) == "" {
+		missing = append(missing, "KT_CUSTOMER_KEY")
+	}
+	if len(missing) > 0 {
+		return nil, cfg.MissingSettingsError("partner auth", missing...)
 	}
 
 	ci, err := BuildPartnerCipher(cfg.DeveloperKey, cfg.CustomerKey)

@@ -247,8 +247,15 @@ func (c *Client) applyAuth(req *http.Request) error {
 func (c *Client) login(ctx context.Context) (*sessionAuth, error) {
 	username := strings.TrimSpace(c.cfg.Username)
 	password := c.cfg.Password
-	if username == "" || password == "" {
-		return nil, fmt.Errorf("KT_USERNAME and KT_PASSWORD are required for session auth")
+	missing := make([]string, 0, 2)
+	if username == "" {
+		missing = append(missing, "KT_USERNAME")
+	}
+	if password == "" {
+		missing = append(missing, "KT_PASSWORD")
+	}
+	if len(missing) > 0 {
+		return nil, c.cfg.MissingSettingsError("session auth", missing...)
 	}
 
 	payload := map[string]string{
