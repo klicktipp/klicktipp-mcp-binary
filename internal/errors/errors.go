@@ -1,6 +1,9 @@
 package errors
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 type APIError struct {
 	Status  int
@@ -20,7 +23,8 @@ func Structured(err error) map[string]any {
 		return nil
 	}
 
-	if apiErr, ok := err.(*APIError); ok {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
 		errType := "klicktipp_api_error"
 		if apiErr.Status == 406 {
 			errType = "business_validation_error"

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -16,6 +17,8 @@ import (
 )
 
 const jsonSchemaDraft07 = "https://json-schema.org/draft/2020-12/schema"
+
+const smartTagDiscoveryNote = "Smart Tags do not currently have an independently discoverable catalog in this MCP server. Use get_contact to obtain known smart_tag_ids, then call get_tag or search_tagged_contacts with one of those IDs."
 
 type toolLevel string
 
@@ -42,7 +45,7 @@ func Register(server *mcp.Server, client *api.Client, cfg config.Config, env map
 
 func build(client *api.Client, cfg config.Config) []toolSpec {
 	tools := []toolSpec{
-		readTool("list_tags", "List KlickTipp tags as id/name pairs.", objectSchema(), func(ctx context.Context, args map[string]any) (any, error) {
+		readTool("list_tags", "List the manually discoverable KlickTipp tag catalog as id/name pairs. Smart Tags do not currently have a separate catalog endpoint here; use get_contact to obtain known smart_tag_ids, then use get_tag or search_tagged_contacts by ID.", objectSchema(), func(ctx context.Context, args map[string]any) (any, error) {
 			tags, err := client.ListTags(ctx)
 			if err != nil {
 				return nil, err
@@ -54,10 +57,26 @@ func build(client *api.Client, cfg config.Config) []toolSpec {
 			sort.Slice(items, func(i int, j int) bool {
 				return fmt.Sprint(items[i]["id"]) < fmt.Sprint(items[j]["id"])
 			})
-			return map[string]any{"count": len(items), "items": items}, nil
+			return map[string]any{
+				"count": len(items),
+				"items": items,
+				"discovery": map[string]any{
+					"manual_tag_catalog_supported": true,
+					"smart_tag_catalog_supported":  false,
+					"note":                         smartTagDiscoveryNote,
+				},
+			}, nil
 		}),
-		readTool("get_tag", "Get one KlickTipp tag by tag ID.", objectSchema(propStringOrIntegerID("tagid")), func(ctx context.Context, args map[string]any) (any, error) {
-			return client.GetTag(ctx, args["tagid"])
+		readTool("get_tag", "Get one KlickTipp tag by known tag ID. This supports manual tag IDs and known Smart Tag IDs. Smart Tags are read-only context here and do not currently have a separate catalog endpoint.", objectSchema(propStringOrIntegerID("tagid")), func(ctx context.Context, args map[string]any) (any, error) {
+			result, err := client.GetTag(ctx, args["tagid"])
+			if err != nil {
+				return nil, annotateKnownTagLookupError(args["tagid"], err)
+			}
+			manualTagIDs, err := client.ListTags(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return enrichTagLookupResult(result, args["tagid"], manualTagIDs), nil
 		}),
 		readTool("list_fields", "List KlickTipp data fields as id/name pairs.", objectSchema(), func(ctx context.Context, args map[string]any) (any, error) {
 			fields, err := client.ListFields(ctx)
@@ -107,8 +126,12 @@ func build(client *api.Client, cfg config.Config) []toolSpec {
 		readTool("list_contacts", "List KlickTipp contact IDs with optional status and bounce status filters. Allowed status values: subscribed, pending, unsubscribed. Allowed bounceStatus values: nobounce, softbounce, hardbounce, spambounce.", objectSchema(optionalEnumArray("status", "subscribed", "pending", "unsubscribed"), optionalEnumArray("bounceStatus", "nobounce", "softbounce", "hardbounce", "spambounce")), func(ctx context.Context, args map[string]any) (any, error) {
 			return client.ListContacts(ctx, pick(args, "status", "bounceStatus"))
 		}),
-		readTool("get_contact", "Get one KlickTipp contact by contact ID.", objectSchema(propStringOrIntegerID("subscriberid")), func(ctx context.Context, args map[string]any) (any, error) {
-			return client.GetContact(ctx, args["subscriberid"])
+		readTool("get_contact", "Get one KlickTipp contact by contact ID. The response includes normalized tag_context data with stable manual_tag_ids and smart_tag_ids for follow-up read operations.", objectSchema(propStringOrIntegerID("subscriberid")), func(ctx context.Context, args map[string]any) (any, error) {
+			result, err := client.GetContact(ctx, args["subscriberid"])
+			if err != nil {
+				return nil, err
+			}
+			return enrichContactResult(result), nil
 		}),
 		readTool("search_contact", "Search for a KlickTipp contact ID by email address.", objectSchema(propEmail("email")), func(ctx context.Context, args map[string]any) (any, error) {
 			email, err := requireString(args, "email")
@@ -117,8 +140,12 @@ func build(client *api.Client, cfg config.Config) []toolSpec {
 			}
 			return client.SearchContact(ctx, map[string]any{"email": email})
 		}),
-		readTool("search_tagged_contacts", "List tagged KlickTipp contacts for one tag, with optional status and bounce status filters. Allowed status values: subscribed, pending, unsubscribed. Allowed bounceStatus values: nobounce, softbounce, hardbounce, spambounce.", objectSchema(propStringOrIntegerID("tagid"), optionalEnumArray("status", "subscribed", "pending", "unsubscribed"), optionalEnumArray("bounceStatus", "nobounce", "softbounce", "hardbounce", "spambounce")), func(ctx context.Context, args map[string]any) (any, error) {
-			return client.SearchTaggedContacts(ctx, pick(args, "tagid", "status", "bounceStatus"))
+		readTool("search_tagged_contacts", "List KlickTipp contacts for one known tag ID, with optional status and bounce status filters. This supports manual tag IDs and known Smart Tag IDs. Smart Tags do not currently have a separate discovery/catalog endpoint. Allowed status values: subscribed, pending, unsubscribed. Allowed bounceStatus values: nobounce, softbounce, hardbounce, spambounce.", objectSchema(propStringOrIntegerID("tagid"), optionalEnumArray("status", "subscribed", "pending", "unsubscribed"), optionalEnumArray("bounceStatus", "nobounce", "softbounce", "hardbounce", "spambounce")), func(ctx context.Context, args map[string]any) (any, error) {
+			result, err := client.SearchTaggedContacts(ctx, pick(args, "tagid", "status", "bounceStatus"))
+			if err != nil {
+				return nil, annotateKnownTagLookupError(args["tagid"], err)
+			}
+			return result, nil
 		}),
 	}
 
@@ -437,4 +464,199 @@ func prop(name string, required bool, schema map[string]any) map[string]any {
 		result[key] = value
 	}
 	return result
+}
+
+func enrichTagLookupResult(result any, requestedTagID any, manualTagIDs map[string]string) any {
+	tag, ok := result.(map[string]any)
+	if !ok {
+		return result
+	}
+
+	enriched := cloneMap(tag)
+	enriched["lookup_context"] = map[string]any{
+		"known_id_lookup_supported":   true,
+		"smart_tag_catalog_supported": false,
+		"note":                        smartTagDiscoveryNote,
+	}
+
+	if management, ok := inferTagManagement(tag, requestedTagID, manualTagIDs); ok {
+		enriched["management"] = management
+	}
+	return enriched
+}
+
+func enrichContactResult(result any) any {
+	contact, ok := result.(map[string]any)
+	if !ok {
+		return result
+	}
+
+	enriched := cloneMap(contact)
+	manualEntries, manualIDs := normalizeTagAssignments(contact["manual_tags"])
+	smartEntries, smartIDs := normalizeTagAssignments(contact["smart_tags"])
+	allIDs := append([]string{}, manualIDs...)
+	allIDs = append(allIDs, smartIDs...)
+	sort.Strings(allIDs)
+
+	enriched["tag_context"] = map[string]any{
+		"manual_tag_ids":              manualIDs,
+		"smart_tag_ids":               smartIDs,
+		"all_tag_ids":                 dedupeSortedStrings(allIDs),
+		"manual_tags":                 manualEntries,
+		"smart_tags":                  smartEntries,
+		"smart_tag_catalog_supported": false,
+		"note":                        smartTagDiscoveryNote,
+	}
+	return enriched
+}
+
+func inferTagManagement(tag map[string]any, requestedTagID any, manualTagIDs map[string]string) (map[string]any, bool) {
+	if value, ok := firstMapValue(tag, "read_only", "readonly", "system_managed", "systemManaged", "is_smart_tag", "isSmartTag", "smart_tag", "smartTag"); ok {
+		if boolean, ok := toBool(value); ok {
+			if boolean {
+				return map[string]any{
+					"mode":      "system_managed",
+					"read_only": true,
+					"note":      "This tag was identified as system-managed/read-only from the API response.",
+				}, true
+			}
+			return map[string]any{
+				"mode":      "manual",
+				"read_only": false,
+				"note":      "This tag was identified as a manual tag from the API response.",
+			}, true
+		}
+	}
+
+	if value, ok := firstMapValue(tag, "type", "tag_type", "tagType", "kind"); ok {
+		normalized := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
+		if normalized != "" {
+			switch normalized {
+			case "smart", "smart_tag", "smarttag", "system", "system_managed":
+				return map[string]any{
+					"mode":      "system_managed",
+					"read_only": true,
+					"note":      "This tag was identified as system-managed/read-only from the API response.",
+				}, true
+			case "manual":
+				return map[string]any{
+					"mode":      "manual",
+					"read_only": false,
+					"note":      "This tag was identified as a manual tag from the API response.",
+				}, true
+			}
+		}
+	}
+
+	if isManualTagID(requestedTagID, tag, manualTagIDs) {
+		return map[string]any{
+			"mode":      "manual",
+			"read_only": false,
+			"note":      "This tag was identified as manual because its ID appears in the manual tag catalog returned by list_tags.",
+		}, true
+	}
+
+	return nil, false
+}
+
+func normalizeTagAssignments(raw any) ([]map[string]any, []string) {
+	assignments, ok := raw.(map[string]any)
+	if !ok || len(assignments) == 0 {
+		return []map[string]any{}, []string{}
+	}
+
+	ids := make([]string, 0, len(assignments))
+	for id := range assignments {
+		ids = append(ids, fmt.Sprint(id))
+	}
+	sort.Strings(ids)
+
+	entries := make([]map[string]any, 0, len(ids))
+	for _, id := range ids {
+		entry := map[string]any{"id": id}
+		if assignedAt, ok := assignments[id]; ok && assignedAt != nil {
+			entry["assigned_at"] = assignedAt
+		}
+		entries = append(entries, entry)
+	}
+
+	return entries, ids
+}
+
+func dedupeSortedStrings(items []string) []string {
+	if len(items) == 0 {
+		return []string{}
+	}
+
+	deduped := make([]string, 0, len(items))
+	var previous string
+	for index, item := range items {
+		if index == 0 || item != previous {
+			deduped = append(deduped, item)
+			previous = item
+		}
+	}
+	return deduped
+}
+
+func cloneMap(value map[string]any) map[string]any {
+	cloned := make(map[string]any, len(value))
+	for key, item := range value {
+		cloned[key] = item
+	}
+	return cloned
+}
+
+func firstMapValue(value map[string]any, keys ...string) (any, bool) {
+	for _, key := range keys {
+		if item, ok := value[key]; ok {
+			return item, true
+		}
+	}
+	return nil, false
+}
+
+func toBool(value any) (bool, bool) {
+	switch typed := value.(type) {
+	case bool:
+		return typed, true
+	case string:
+		switch strings.ToLower(strings.TrimSpace(typed)) {
+		case "true", "1", "yes", "on":
+			return true, true
+		case "false", "0", "no", "off":
+			return false, true
+		}
+	}
+	return false, false
+}
+
+func isManualTagID(requestedTagID any, tag map[string]any, manualTagIDs map[string]string) bool {
+	if len(manualTagIDs) == 0 {
+		return false
+	}
+
+	candidates := []string{strings.TrimSpace(fmt.Sprint(requestedTagID))}
+	if value, ok := firstMapValue(tag, "tagid", "id"); ok {
+		candidates = append(candidates, strings.TrimSpace(fmt.Sprint(value)))
+	}
+
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		if _, ok := manualTagIDs[candidate]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func annotateKnownTagLookupError(tagID any, err error) error {
+	var apiErr *kerrors.APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != 404 {
+		return err
+	}
+
+	return fmt.Errorf("tag %v was not found. Manual tags can be discovered with list_tags, but Smart Tags cannot currently be discovered independently; use get_contact to obtain a known smart_tag_id before retrying: %w", tagID, err)
 }
