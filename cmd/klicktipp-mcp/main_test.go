@@ -18,3 +18,9 @@ func TestEnvPathUsesExecutableDirectory(t *testing.T) {
 		t.Fatalf("envPath(%q) = %q, want %q", executable, got, want)
 	}
 }
+
+func TestDefaultVersionIsSet(t *testing.T) {
+	if version == "" {
+		t.Fatal("expected version to be non-empty")
+	}
+}

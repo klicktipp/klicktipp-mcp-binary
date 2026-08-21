@@ -12,6 +12,8 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+var version = "dev"
+
 func main() {
 	executable, err := os.Executable()
 	if err != nil {
@@ -34,7 +36,7 @@ func main() {
 	client := api.NewClient(cfg)
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "klicktipp-mcp",
-		Version: "0.2.0-go-sdk",
+		Version: version,
 	}, nil)
 
 	tools.Register(server, client, cfg, env)
